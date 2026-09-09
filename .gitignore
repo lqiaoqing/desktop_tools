@@ -121,3 +121,6 @@ Makefile*
 *.p12
 secrets.json
 credentials.json
+
+# Local planning docs (keep offline)
+docs/plans/
