@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <UseWindowsForms>true</UseWindowsForms>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>DesktopTools</RootNamespace>
+    <AssemblyName>DesktopTools</AssemblyName>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <LangVersion>latest</LangVersion>
+    <ApplicationHighDpiMode>PerMonitorV2</ApplicationHighDpiMode>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="DesktopTools.Tests" />
+  </ItemGroup>
+
+  <Target Name="CopyHelper" AfterTargets="Build">
+    <ItemGroup>
+      <HelperFiles Include="$(MSBuildThisFileDirectory)..\DesktopTools.Helper\bin\$(Configuration)\net10.0-windows\DesktopTools.Helper.exe" />
+      <HelperFiles Include="$(MSBuildThisFileDirectory)..\DesktopTools.Helper\bin\$(Configuration)\net10.0-windows\DesktopTools.Helper.dll" />
+      <HelperFiles Include="$(MSBuildThisFileDirectory)..\DesktopTools.Helper\bin\$(Configuration)\net10.0-windows\DesktopTools.Helper.runtimeconfig.json" />
+      <HelperFiles Include="$(MSBuildThisFileDirectory)..\DesktopTools.Helper\bin\$(Configuration)\net10.0-windows\DesktopTools.Helper.deps.json" />
+    </ItemGroup>
+    <MakeDir Directories="$(OutputPath)helper" Condition="Exists('%(HelperFiles.Identity)')" />
+    <Copy SourceFiles="@(HelperFiles)" DestinationFolder="$(OutputPath)helper" SkipUnchangedFiles="true" Condition="Exists('%(HelperFiles.Identity)')" />
+  </Target>
+
+</Project>

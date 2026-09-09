@@ -6,13 +6,17 @@ Windows 11 桌面工具集合，覆盖效率工具、AI 工具、开发者工具
 
 ## 当前状态
 
-仓库处于早期阶段，尚未包含可运行源码。
+已实现第一个功能：Windows 11 托盘常驻一键内存清理（C# / WPF / .NET 10）。
 
-规划中的第一个功能：托盘常驻的一键内存清理（清理自身 Working Set 与 System File Cache，按需 UAC）。
+- 主程序 `src/DesktopTools`：asInvoker，单实例，托盘，主窗口，统一内存查询与清理流程。
+- 提升 Helper `src/DesktopTools.Helper`：固定 `cache-flush` 协议，按需 UAC 清理 System File Cache。
+- 测试 `tests/DesktopTools.Tests`：聚合、并发、Before/After 失败、Helper 故障等单元测试。
+
+不清理 Standby List，不结束第三方进程，不强制 Trim 第三方 Working Set。
 
 ## 技术方向
 
-默认目标平台为 Windows 11。具体技术栈按功能需求选择，不预先锁定框架（可考虑 WPF / WinUI 3 / .NET、Tauri、Electron、Qt、Python 等）。
+默认目标平台为 Windows 11。V1 固定为 C# / WPF、`net10.0-windows`（.NET 10 LTS），锁定 SDK 见 `global.json`。
 
 ## 开发约定
 
