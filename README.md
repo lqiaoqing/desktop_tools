@@ -18,6 +18,6 @@ Windows 11 桌面工具集合，覆盖效率工具、AI 工具、开发者工具
 
 协作方式、修改原则、完成标准等见 [docs/dev-guidelines.md](docs/dev-guidelines.md)。
 
-## 本地说明
+## 实施计划
 
-实施计划等本地文档放在 `docs/plans/`，该目录不纳入远程仓库。
+当前功能的实施计划见 [docs/plans/windows-memory-cleanup-implementation-plan.md](docs/plans/windows-memory-cleanup-implementation-plan.md)。
