@@ -37,15 +37,24 @@ dotnet --list-sdks
 git clone https://github.com/lqiaoqing/desktop_tools.git
 cd desktop_tools
 
-# 还原依赖（主程序/Helper 无第三方包；测试包来自 NuGet）
+# 一键：检查 SDK → restore → 编译 → 测试
+powershell -ExecutionPolicy Bypass -File .\build.ps1
+
+# 或分步手动执行
 dotnet restore DesktopTools.sln
-
-# 建议整包编译，确保 Helper 一并产出并复制到主程序 helper\ 目录
 dotnet build DesktopTools.sln -c Debug
-
-# 运行单元测试
 dotnet test tests\DesktopTools.Tests\DesktopTools.Tests.csproj -c Debug --no-build
 ```
+
+`build.ps1` 常用参数：
+
+| 参数 | 说明 |
+| --- | --- |
+| （默认） | Debug 编译 + 测试 |
+| `-Configuration Release` | Release 编译 + 测试 |
+| `-Publish` | 额外发布 win-x64 自包含到 `artifacts/win-x64` |
+| `-SkipRestore` | 跳过 restore |
+| `-SkipTests` | 跳过测试 |
 
 启动主程序：
 
@@ -59,6 +68,7 @@ src\DesktopTools\bin\Debug\net10.0-windows\DesktopTools.exe
 
 ```text
 desktop_tools/
+├── build.ps1                     # 一键 restore / build / test（可选 -Publish）
 ├── DesktopTools.sln              # 解决方案入口
 ├── global.json                   # 锁定 .NET SDK
 ├── src/
