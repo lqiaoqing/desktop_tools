@@ -96,6 +96,11 @@ public class MemoryCleanupServiceTests
         Assert.Null(result.AfterSnapshot);
         Assert.Equal("after fail", result.AfterQueryError);
         Assert.False(service.IsCleaning);
+
+        // After 失败后 CurrentSnapshot 必须变为 unavailable，不能继续展示 Before 数据。
+        Assert.NotNull(service.CurrentSnapshot);
+        Assert.False(service.CurrentSnapshot!.IsAvailable);
+        Assert.Equal("after fail", service.CurrentSnapshot.QueryError);
     }
 
     [Fact]
@@ -190,6 +195,34 @@ public class MemoryCleanupServiceTests
         Assert.False(service.TryBeginCleanup(out var task));
         Assert.Null(task);
         Assert.True(service.ExitRequested);
+    }
+
+    [Fact]
+    public async Task RequestExitDuringCleanup_RejectsFurtherBegin()
+    {
+        var started = new ManualResetEventSlim(false);
+        var release = new ManualResetEventSlim(false);
+        var service = CreateService(
+            () => OkSnapshot(),
+            () =>
+            {
+                started.Set();
+                release.Wait(TimeSpan.FromSeconds(5));
+                return OperationResult.Success();
+            });
+
+        Assert.True(service.TryBeginCleanup(out var task));
+        Assert.True(started.Wait(TimeSpan.FromSeconds(5)));
+
+        service.RequestExit();
+        Assert.True(service.ExitRequested);
+        Assert.False(service.TryBeginCleanup(out var next));
+        Assert.Null(next);
+
+        release.Set();
+        await task!;
+        Assert.False(service.IsCleaning);
+        Assert.False(service.TryBeginCleanup(out _));
     }
 
     [Fact]

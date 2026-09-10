@@ -16,6 +16,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="DesktopTools.Tests" />
+    <!-- 保证 F5 / dotnet run / 整包编译都先产出 Helper，再复制到固定 helper\ 布局 -->
+    <ProjectReference Include="..\DesktopTools.Helper\DesktopTools.Helper.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="CopyHelper" AfterTargets="Build">
@@ -25,8 +27,10 @@
       <HelperFiles Include="$(MSBuildThisFileDirectory)..\DesktopTools.Helper\bin\$(Configuration)\net10.0-windows\DesktopTools.Helper.runtimeconfig.json" />
       <HelperFiles Include="$(MSBuildThisFileDirectory)..\DesktopTools.Helper\bin\$(Configuration)\net10.0-windows\DesktopTools.Helper.deps.json" />
     </ItemGroup>
-    <MakeDir Directories="$(OutputPath)helper" Condition="Exists('%(HelperFiles.Identity)')" />
-    <Copy SourceFiles="@(HelperFiles)" DestinationFolder="$(OutputPath)helper" SkipUnchangedFiles="true" Condition="Exists('%(HelperFiles.Identity)')" />
+    <MakeDir Directories="$(OutputPath)helper" />
+    <Copy SourceFiles="@(HelperFiles)" DestinationFolder="$(OutputPath)helper" SkipUnchangedFiles="true" />
+    <Error Condition="!Exists('$(OutputPath)helper\DesktopTools.Helper.exe')"
+           Text="DesktopTools.Helper.exe missing under $(OutputPath)helper. Build order or Helper output is broken." />
   </Target>
 
 </Project>

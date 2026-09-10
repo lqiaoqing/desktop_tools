@@ -3,6 +3,7 @@ namespace DesktopTools;
 public sealed class MemoryCleanupService
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly object _admission = new();
     private readonly Func<MemorySnapshot> _queryMemory;
     private readonly Func<OperationResult> _emptyWorkingSet;
     private readonly Func<TimeSpan?, HelperLaunchResult> _runHelper;
@@ -71,21 +72,31 @@ public sealed class MemoryCleanupService
 
     public void RequestExit()
     {
-        Volatile.Write(ref _exitRequested, 1);
+        // 与 TryBeginCleanup 的准入检查共用同一串行区，关闭 check-then-wait 竞争窗口。
+        lock (_admission)
+        {
+            Volatile.Write(ref _exitRequested, 1);
+        }
+
         RaiseStateChanged();
     }
 
     public bool TryBeginCleanup(out Task<CleanupResult>? cleanupTask)
     {
         cleanupTask = null;
-        if (ExitRequested)
-        {
-            return false;
-        }
 
-        if (!_gate.Wait(0))
+        // 退出标志与门闩取得必须在同一串行机制内，保证退出后不再接受新清理。
+        lock (_admission)
         {
-            return false;
+            if (Volatile.Read(ref _exitRequested) == 1)
+            {
+                return false;
+            }
+
+            if (!_gate.Wait(0))
+            {
+                return false;
+            }
         }
 
         lock (_stateLock)
@@ -254,6 +265,21 @@ public sealed class MemoryCleanupService
         {
             afterError = after.QueryError;
             after = null;
+            // After 失败不得把 Before 数据继续当作“当前内存”展示。
+            var unavailable = new MemorySnapshot
+            {
+                Timestamp = DateTime.Now,
+                QueryError = afterError
+            };
+            lock (_stateLock)
+            {
+                if (afterSeq >= _publishedSequence)
+                {
+                    _publishedSequence = afterSeq;
+                    CurrentSnapshot = unavailable;
+                }
+            }
+
             Log.Error($"After memory query failed: {afterError}");
         }
         else

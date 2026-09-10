@@ -120,10 +120,22 @@ public sealed class HelperLauncher
 
         if (!process.WaitForExit((int)budget.TotalMilliseconds))
         {
-            // 主程序不强制结束高权限 Helper；按结果未知处理。
+            // 超时仅表示结果未知；在 Helper 实际退出前不得返回，
+            // 避免调用方在提升进程仍存活时释放清理门闩。
+            process.WaitForExit();
+            int? lateExitCode = null;
+            try
+            {
+                lateExitCode = process.ExitCode;
+            }
+            catch
+            {
+            }
+
             return new HelperLaunchResult
             {
-                Operation = OperationResult.Failed("ResultUnavailable: helper wait timed out")
+                Operation = OperationResult.Failed("ResultUnavailable: helper wait timed out"),
+                ExitCode = lateExitCode
             };
         }
 

@@ -15,6 +15,7 @@ internal static class Program
 
     private static int Main(string[] args)
     {
+        IntPtr parentHandle = IntPtr.Zero;
         try
         {
             var parsed = ParseArgs(args);
@@ -24,24 +25,50 @@ internal static class Program
                 return ExitProtocolError;
             }
 
-            if (!VerifyParent(parsed.Value.ParentPid, parsed.Value.ParentStartUtcFileTime))
+            parentHandle = OpenAndVerifyParent(parsed.Value.ParentPid, parsed.Value.ParentStartUtcFileTime);
+            if (parentHandle == IntPtr.Zero)
             {
                 SimpleLog.Error("Parent process identity verification failed");
                 return ExitParentVerificationFailed;
             }
 
-            using var watchdog = new Watchdog(TimeSpan.FromSeconds(30));
+            // 看门狗同时负责：30 秒预算、父进程持续监测。
+            using var watchdog = new Watchdog(TimeSpan.FromSeconds(30), parentHandle);
+
             if (!EnableSeIncreaseQuotaPrivilege())
             {
                 SimpleLog.Error("Privilege preparation failed");
                 return ExitPrivilegeFailed;
             }
 
+            if (!TryGetSystemFileCacheSize(out nuint beforeMin, out nuint beforeMax, out uint beforeFlags, out int beforeErr))
+            {
+                SimpleLog.Error($"GetSystemFileCacheSize(before) failed, Win32Error={beforeErr}");
+                return ExitCacheApiFailed;
+            }
+
+            SimpleLog.Info($"Cache size before: min={beforeMin} max={beforeMax} flags={beforeFlags}");
+
             if (!SetSystemFileCacheSize(unchecked((nuint)(-1)), unchecked((nuint)(-1)), 0))
             {
                 int error = Marshal.GetLastWin32Error();
                 SimpleLog.Error($"SetSystemFileCacheSize failed, Win32Error={error}");
                 return ExitCacheApiFailed;
+            }
+
+            if (!TryGetSystemFileCacheSize(out nuint afterMin, out nuint afterMax, out uint afterFlags, out int afterErr))
+            {
+                SimpleLog.Error($"GetSystemFileCacheSize(after) failed, Win32Error={afterErr}");
+                // API 已成功；诊断失败只记录，不伪造清理结果。
+            }
+            else
+            {
+                SimpleLog.Info($"Cache size after: min={afterMin} max={afterMax} flags={afterFlags}");
+                if (beforeMin != afterMin || beforeMax != afterMax || beforeFlags != afterFlags)
+                {
+                    SimpleLog.Error(
+                        "System File Cache policy changed by this operation; acceptance requires unchanged limits/flags");
+                }
             }
 
             SimpleLog.Info("SetSystemFileCacheSize succeeded");
@@ -51,6 +78,13 @@ internal static class Program
         {
             SimpleLog.Error($"Helper internal exception: {ex}");
             return ExitInternalException;
+        }
+        finally
+        {
+            if (parentHandle != IntPtr.Zero)
+            {
+                CloseHandle(parentHandle);
+            }
         }
     }
 
@@ -120,43 +154,39 @@ internal static class Program
     private const uint Synchronize = 0x00100000;
     private const uint WaitObject0 = 0;
 
-    private static bool VerifyParent(uint pid, long expectedStartUtcFileTime)
+    /// <summary>打开并校验父进程；成功返回仍持有的句柄（供持续监测），失败返回 Zero。</summary>
+    private static IntPtr OpenAndVerifyParent(uint pid, long expectedStartUtcFileTime)
     {
         IntPtr handle = OpenProcess(ProcessQueryLimitedInformation | Synchronize, false, pid);
         if (handle == IntPtr.Zero)
         {
             SimpleLog.Error($"OpenProcess failed, Win32Error={Marshal.GetLastWin32Error()}");
-            return false;
+            return IntPtr.Zero;
         }
 
-        try
+        if (!GetProcessTimes(handle, out long creationTime, out _, out _, out _))
         {
-            if (!GetProcessTimes(handle, out long creationTime, out _, out _, out _))
-            {
-                SimpleLog.Error($"GetProcessTimes failed, Win32Error={Marshal.GetLastWin32Error()}");
-                return false;
-            }
-
-            if (creationTime != expectedStartUtcFileTime)
-            {
-                SimpleLog.Error("Parent creation time mismatch");
-                return false;
-            }
-
-            // 父进程已退出时不再继续。
-            uint wait = WaitForSingleObject(handle, 0);
-            if (wait == WaitObject0)
-            {
-                SimpleLog.Error("Parent process already exited");
-                return false;
-            }
-
-            return true;
-        }
-        finally
-        {
+            SimpleLog.Error($"GetProcessTimes failed, Win32Error={Marshal.GetLastWin32Error()}");
             CloseHandle(handle);
+            return IntPtr.Zero;
         }
+
+        if (creationTime != expectedStartUtcFileTime)
+        {
+            SimpleLog.Error("Parent creation time mismatch");
+            CloseHandle(handle);
+            return IntPtr.Zero;
+        }
+
+        uint wait = WaitForSingleObject(handle, 0);
+        if (wait == WaitObject0)
+        {
+            SimpleLog.Error("Parent process already exited");
+            CloseHandle(handle);
+            return IntPtr.Zero;
+        }
+
+        return handle;
     }
 
     [DllImport("advapi32.dll", SetLastError = true)]
@@ -264,24 +294,70 @@ internal static class Program
     [return: MarshalAs(UnmanagedType.Bool)]
     private static extern bool SetSystemFileCacheSize(nuint MinimumFileCacheSize, nuint MaximumFileCacheSize, uint Flags);
 
-    private sealed class Watchdog : IDisposable
-    {
-        private readonly System.Threading.Timer _timer;
-        private int _fired;
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetSystemFileCacheSize(out nuint MinimumFileCacheSize, out nuint MaximumFileCacheSize, out uint Flags);
 
-        public Watchdog(TimeSpan budget)
+    private static bool TryGetSystemFileCacheSize(out nuint min, out nuint max, out uint flags, out int win32Error)
+    {
+        if (!GetSystemFileCacheSize(out min, out max, out flags))
         {
-            _timer = new System.Threading.Timer(_ =>
-            {
-                if (Interlocked.Exchange(ref _fired, 1) == 0)
-                {
-                    SimpleLog.Error("Watchdog timeout, self-exiting");
-                    Environment.Exit(ExitWatchdogTimeout);
-                }
-            }, null, budget, Timeout.InfiniteTimeSpan);
+            win32Error = Marshal.GetLastWin32Error();
+            return false;
         }
 
-        public void Dispose() => _timer.Dispose();
+        win32Error = 0;
+        return true;
+    }
+
+    private sealed class Watchdog : IDisposable
+    {
+        private readonly System.Threading.Timer _budgetTimer;
+        private readonly System.Threading.Timer _parentTimer;
+        private readonly IntPtr _parentHandle;
+        private int _fired;
+
+        public Watchdog(TimeSpan budget, IntPtr parentHandle)
+        {
+            _parentHandle = parentHandle;
+
+            _budgetTimer = new System.Threading.Timer(_ => Fire(ExitWatchdogTimeout, "budget expired"),
+                null, budget, Timeout.InfiniteTimeSpan);
+
+            // 持续监测父进程；退出或监测失败立即自终止。
+            _parentTimer = new System.Threading.Timer(_ =>
+            {
+                if (_parentHandle == IntPtr.Zero)
+                {
+                    return;
+                }
+
+                uint wait = WaitForSingleObject(_parentHandle, 0);
+                if (wait == WaitObject0)
+                {
+                    Fire(ExitParentVerificationFailed, "parent exited");
+                }
+                else if (wait == 0xFFFFFFFF)
+                {
+                    Fire(ExitParentVerificationFailed, $"parent wait failed, Win32Error={Marshal.GetLastWin32Error()}");
+                }
+            }, null, TimeSpan.FromMilliseconds(500), TimeSpan.FromMilliseconds(500));
+        }
+
+        private void Fire(int code, string reason)
+        {
+            if (Interlocked.Exchange(ref _fired, 1) == 0)
+            {
+                SimpleLog.Error($"Watchdog self-exit ({code}): {reason}");
+                Environment.Exit(code);
+            }
+        }
+
+        public void Dispose()
+        {
+            _budgetTimer.Dispose();
+            _parentTimer.Dispose();
+        }
     }
 }
 
