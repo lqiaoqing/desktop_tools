@@ -14,6 +14,8 @@ Windows 11 桌面工具集合，覆盖效率工具、AI 工具、开发者工具
 
 不清理 Standby List，不结束第三方进程，不强制 Trim 第三方 Working Set。
 
+单元测试不能替代真实 UAC 与进程生命周期验证。发布前请按 [docs/manual-verification-checklist.md](docs/manual-verification-checklist.md) 在 Windows 11 x64 上完成实机验收。
+
 ## 环境要求
 
 | 项 | 要求 |
