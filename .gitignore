@@ -51,6 +51,9 @@ TestResult.xml
 *.DotCover
 packages/
 !packages/build/
+.nuget-packages/
+.local-nuget/
+NuGet.config
 
 # WinUI / MSIX / packaging
 AppPackages/

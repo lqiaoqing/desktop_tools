@@ -9,6 +9,7 @@ public sealed class TrayController : IDisposable
     private readonly NotifyIcon _notifyIcon;
     private MainWindow? _mainWindow;
     private bool _disposed;
+    private int _shutdownRequested;
 
     public TrayController(MemoryCleanupService service)
     {
@@ -64,32 +65,26 @@ public sealed class TrayController : IDisposable
 
     private void ExitApplication()
     {
+        // 关闭清理准入；本次若仍在清理/UAC/Helper 等待中，则保持 pending，
+        // 由 StateChanged 在 IsCleaning 变为 false 后收尾，绝不在 UI 线程同步轮询。
         _service.RequestExit();
         _notifyIcon.Text = "Desktop Tools — 正在退出…";
-        System.Windows.Forms.Application.DoEvents();
+        TryShutdownWhenExitReady();
+    }
 
-        // UAC 对话框可能超过 Helper 自身 30s 预算，退出需等待本次选择/执行完成。
-        const int waitBudgetMs = 120000;
-        int waited = 0;
-        while (_service.IsCleaning && waited < waitBudgetMs)
+    private void TryShutdownWhenExitReady()
+    {
+        if (!_service.ExitRequested || _service.IsCleaning)
         {
-            System.Threading.Thread.Sleep(100);
-            waited += 100;
-        }
-
-        if (_service.IsCleaning)
-        {
-            // 设计要求：Helper 仍未退出时不得声称已完整退出。
-            Log.Error("Exit aborted: cleanup/helper still running after wait budget");
-            _notifyIcon.Text = "Desktop Tools — 无法完成退出";
-            System.Windows.MessageBox.Show(
-                "无法完成退出：清理或提升的 Helper 仍未结束。请稍后再试，或等待 Helper 自行退出。",
-                "Desktop Tools",
-                System.Windows.MessageBoxButton.OK,
-                System.Windows.MessageBoxImage.Warning);
             return;
         }
 
+        if (Interlocked.Exchange(ref _shutdownRequested, 1) != 0)
+        {
+            return;
+        }
+
+        Log.Info("Exit ready: cleanup finished, shutting down");
         System.Windows.Application.Current?.Shutdown();
     }
 
@@ -117,6 +112,7 @@ public sealed class TrayController : IDisposable
                 else if (_service.ExitRequested)
                 {
                     _notifyIcon.Text = "Desktop Tools — 正在退出…";
+                    TryShutdownWhenExitReady();
                 }
                 else if (_service.LastCleanupResult is { } result)
                 {
@@ -143,7 +139,8 @@ public sealed class TrayController : IDisposable
         }
         else
         {
-            dispatcher.Invoke(Apply);
+            // 异步回 UI：后台清理线程不得同步等待 Dispatcher，否则与退出路径互锁。
+            dispatcher.BeginInvoke(Apply);
         }
     }
 

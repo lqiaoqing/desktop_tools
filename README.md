@@ -108,7 +108,7 @@ src\DesktopTools\bin\<Configuration>\net10.0-windows\helper\DesktopTools.Helper.
 | Release 编译 | `dotnet build DesktopTools.sln -c Release` |
 | 用 VS 开发 | 打开 `DesktopTools.sln`，把 `DesktopTools` 设为启动项目，F5 |
 
-**注意：** 不要只 `dotnet build src\DesktopTools` 而跳过 Helper。主工程没有显式 `ProjectReference` 到 Helper；若 `helper\` 尚不存在，复制目标会静默跳过，运行时清理会报 Helper not found。整包 `dotnet build DesktopTools.sln` 一般会把三个工程都编出来。
+**注意：** 主工程通过 `ReferenceOutputAssembly=false` 的 `ProjectReference` 保证先编译 Helper，再由 `CopyHelper` 目标复制到 `helper\`。请优先整包 `dotnet build DesktopTools.sln`；若手动只编主工程且 `helper\DesktopTools.Helper.exe` 缺失，构建会直接报错，运行时清理会报 Helper not found。
 
 ## 发布
 

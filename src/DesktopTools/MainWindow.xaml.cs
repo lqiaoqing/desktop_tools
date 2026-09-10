@@ -55,7 +55,15 @@ public partial class MainWindow : Window
 
     private void OnServiceStateChanged(object? sender, EventArgs e)
     {
-        Dispatcher.Invoke(() =>
+        // 异步回 UI：避免后台 RaiseStateChanged 同步等待 Dispatcher。
+        if (Dispatcher.CheckAccess())
+        {
+            UpdateFromState();
+            RefreshMemoryDisplay();
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() =>
         {
             UpdateFromState();
             RefreshMemoryDisplay();
